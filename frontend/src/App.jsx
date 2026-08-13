@@ -165,7 +165,7 @@ function ChatDashboard({ auth, displayName }) {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                placeholder="Message…"
+                placeholder={chat.status === "reconnecting" ? "Reconnecting…" : "Message…"}
                 disabled={chat.status !== "open"}
               />
               <button className="shorten-btn" onClick={handleSend} disabled={chat.status !== "open"}>

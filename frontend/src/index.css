@@ -149,7 +149,9 @@ body {
   letter-spacing: 1px; color: var(--text-3);
 }
 .ws-status.ws-open { color: var(--accent); }
-.ws-status.ws-error, .ws-status.ws-closed { color: var(--danger); }
+.ws-status.ws-error { color: var(--danger); }
+.ws-status.ws-reconnecting { color: var(--danger); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 .message-list { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .message { max-width: 70%; }
