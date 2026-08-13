@@ -10,6 +10,10 @@ React (S3 + CloudFront) ── Cognito (auth)
         ├── HTTP API  ── Lambda (rooms, history) ── DynamoDB
         │
         └── WebSocket API ── Lambda (connect, disconnect, joinRoom, sendMessage) ── DynamoDB
+                                                                        │
+                                                              DynamoDB Stream
+                                                                        │
+                                                                     fanout ── deliver (× N, parallel)
 ```
 
 - **Frontend**: React SPA on S3, served through CloudFront (OAC, no public bucket).
@@ -23,11 +27,11 @@ React (S3 + CloudFront) ── Cognito (auth)
 
 AppSync (managed GraphQL subscriptions) would mean less code, but it hides the interesting part of this design: connection lifecycle, JWT verification without a header, and fan-out. Wiring it by hand is the point of the exercise.
 
-## Known limitation: fan-out at scale
+## Fan-out: decoupled via DynamoDB Streams
 
-`sendMessage` queries every connection in a room and calls `postToConnection` on each one, from a single Lambda invocation. That's fine for small rooms but doesn't scale past a few hundred concurrent connections in one room — the Lambda's execution time and the WebSocket Management API's rate limits become the bottleneck.
+`sendMessage` only persists the message — it doesn't touch delivery at all. A DynamoDB Stream on the `messages` table triggers `fanout`, which looks up who's in the room, splits the connections into chunks of 50, and asynchronously invokes `deliver` once per chunk. A large room's delivery therefore runs as many parallel Lambda invocations instead of one Lambda looping through every connection — and because Streams retry a failed batch automatically, a crash mid-delivery no longer silently drops the message the way it would with delivery inline in `sendMessage`.
 
-The standard fix: decouple persistence from fan-out. Write the message, then publish to SNS/EventBridge (or use a DynamoDB Stream on the messages table) and let a separate fan-out Lambda — or several, sharded by connection — handle delivery in parallel. Not built here, since a single Lambda's fan-out is enough to demonstrate the mechanism, but worth calling out explicitly as the next scaling step.
+The cost of that: a small amount of added latency between "message saved" and "message delivered" (stream processing time, typically well under a second), since delivery is no longer synchronous with the send. Worth calling out as the explicit tradeoff — durability and horizontal scalability, at the cost of a little end-to-end latency.
 
 ## Deploying
 

@@ -66,6 +66,41 @@ resource "aws_iam_role_policy" "lambda_manage_connections" {
   })
 }
 
+# fanout reads the messages table's DynamoDB Stream
+resource "aws_iam_role_policy" "lambda_stream_read" {
+  name = "${local.prefix}-lambda-stream-read"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:DescribeStream",
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator",
+        "dynamodb:ListStreams"
+      ]
+      Resource = aws_dynamodb_table.messages.stream_arn
+    }]
+  })
+}
+
+# fanout invokes deliver directly (not through API Gateway or a stream)
+resource "aws_iam_role_policy" "lambda_invoke_deliver" {
+  name = "${local.prefix}-lambda-invoke-deliver"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["lambda:InvokeFunction"]
+      Resource = aws_lambda_function.deliver.arn
+    }]
+  })
+}
+
 # --- Common environment variables for all functions ---
 locals {
   lambda_environment = {
@@ -77,10 +112,15 @@ locals {
     AWS_REGION_         = var.aws_region
   }
 
-  # $connect/joinRoom/sendMessage additionally need the management API endpoint
+  # $connect/joinRoom/deliver additionally need the management API endpoint
   # to push messages back down open connections via postToConnection
   ws_environment = merge(local.lambda_environment, {
     WEBSOCKET_ENDPOINT = "https://${aws_apigatewayv2_api.chat.id}.execute-api.${var.aws_region}.amazonaws.com/${aws_apigatewayv2_stage.chat.name}"
+  })
+
+  # fanout additionally needs to know which function to invoke per chunk
+  fanout_environment = merge(local.lambda_environment, {
+    DELIVER_FUNCTION_NAME = aws_lambda_function.deliver.function_name
   })
 }
 
@@ -102,6 +142,16 @@ resource "aws_cloudwatch_log_group" "join_room" {
 
 resource "aws_cloudwatch_log_group" "send_message" {
   name              = "/aws/lambda/${local.prefix}-send-message"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "fanout" {
+  name              = "/aws/lambda/${local.prefix}-fanout"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "deliver" {
+  name              = "/aws/lambda/${local.prefix}-deliver"
   retention_in_days = 14
 }
 
@@ -138,6 +188,18 @@ data "archive_file" "send_message" {
   type        = "zip"
   source_dir  = "${path.module}/../lambda/sendMessage"
   output_path = "${path.module}/.lambda_builds/sendMessage.zip"
+}
+
+data "archive_file" "fanout" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/fanout"
+  output_path = "${path.module}/.lambda_builds/fanout.zip"
+}
+
+data "archive_file" "deliver" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/deliver"
+  output_path = "${path.module}/.lambda_builds/deliver.zip"
 }
 
 data "archive_file" "rooms" {
@@ -207,6 +269,8 @@ resource "aws_lambda_function" "join_room" {
 }
 
 # --- sendMessage Lambda ---
+# Only persists the message — delivery happens asynchronously via fanout,
+# triggered by the messages table's DynamoDB Stream (see below).
 resource "aws_lambda_function" "send_message" {
   function_name    = "${local.prefix}-send-message"
   role             = aws_iam_role.lambda.arn
@@ -218,10 +282,61 @@ resource "aws_lambda_function" "send_message" {
   timeout          = var.lambda_timeout_seconds
 
   environment {
-    variables = local.ws_environment
+    variables = local.lambda_environment
   }
 
   depends_on = [aws_cloudwatch_log_group.send_message]
+}
+
+# --- deliver Lambda ---
+# Invoked directly by fanout (never by API Gateway or a stream) with one
+# chunk of a room's connections to push a message down.
+resource "aws_lambda_function" "deliver" {
+  function_name    = "${local.prefix}-deliver"
+  role             = aws_iam_role.lambda.arn
+  runtime          = "nodejs20.x"
+  handler          = "index.handler"
+  filename         = data.archive_file.deliver.output_path
+  source_code_hash = data.archive_file.deliver.output_base64sha256
+  memory_size      = var.lambda_memory_mb
+  timeout          = var.lambda_timeout_seconds
+
+  environment {
+    variables = local.ws_environment
+  }
+
+  depends_on = [aws_cloudwatch_log_group.deliver]
+}
+
+# --- fanout Lambda ---
+# Triggered by the messages table's DynamoDB Stream. Looks up who's in the
+# room and hands chunks of connections off to parallel `deliver` invocations.
+resource "aws_lambda_function" "fanout" {
+  function_name    = "${local.prefix}-fanout"
+  role             = aws_iam_role.lambda.arn
+  runtime          = "nodejs20.x"
+  handler          = "index.handler"
+  filename         = data.archive_file.fanout.output_path
+  source_code_hash = data.archive_file.fanout.output_base64sha256
+  memory_size      = var.lambda_memory_mb
+  timeout          = var.lambda_timeout_seconds
+
+  environment {
+    variables = local.fanout_environment
+  }
+
+  depends_on = [aws_cloudwatch_log_group.fanout]
+}
+
+# Wires the messages table's stream to fanout. batch_size=1 keeps delivery
+# latency low; DynamoDB Streams retries a failed batch automatically up to
+# maximum_retry_attempts before giving up on it.
+resource "aws_lambda_event_source_mapping" "messages_stream" {
+  event_source_arn       = aws_dynamodb_table.messages.stream_arn
+  function_name          = aws_lambda_function.fanout.arn
+  starting_position      = "LATEST"
+  batch_size             = 1
+  maximum_retry_attempts = 3
 }
 
 # --- rooms Lambda (list + create) ---

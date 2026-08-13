@@ -67,6 +67,24 @@ jobs:
             --function-name chatapp-prod-send-message \
             --zip-file fileb://sendMessage.zip
 
+      - name: Zip and deploy fanout Lambda
+        run: |
+          cd lambda/fanout
+          zip -r ../../fanout.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-fanout \
+            --zip-file fileb://fanout.zip
+
+      - name: Zip and deploy deliver Lambda
+        run: |
+          cd lambda/deliver
+          zip -r ../../deliver.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-deliver \
+            --zip-file fileb://deliver.zip
+
       - name: Zip and deploy rooms Lambda
         run: |
           cd lambda/rooms

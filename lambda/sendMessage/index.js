@@ -1,14 +1,11 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
-const { ApiGatewayManagementApiClient, PostToConnectionCommand } = require("@aws-sdk/client-apigatewaymanagementapi");
+const { DynamoDBDocumentClient, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { randomUUID } = require("crypto");
 
 const client = new DynamoDBClient({});
 const db = DynamoDBDocumentClient.from(client);
 const CONNECTIONS_TABLE = process.env.CONNECTIONS_TABLE;
 const MESSAGES_TABLE = process.env.MESSAGES_TABLE;
-
-const apiGw = new ApiGatewayManagementApiClient({ endpoint: process.env.WEBSOCKET_ENDPOINT });
 
 exports.handler = async (event) => {
   const connectionId = event.requestContext.connectionId;
@@ -41,27 +38,12 @@ exports.handler = async (event) => {
     createdAt,
   };
 
+  // Delivery to the room happens asynchronously, off of a DynamoDB Stream
+  // on this table (see lambda/fanout) — not from here. That keeps this
+  // handler's cost constant regardless of how many people are in the room,
+  // and Streams retry a failed delivery batch automatically instead of a
+  // crash here silently dropping the message for whoever hadn't gotten it yet.
   await db.send(new PutCommand({ TableName: MESSAGES_TABLE, Item: message }));
-
-  // Fan out to every connection currently in this room
-  const roomConnections = await db.send(new QueryCommand({
-    TableName: CONNECTIONS_TABLE,
-    IndexName: "roomId-index",
-    KeyConditionExpression: "roomId = :roomId",
-    ExpressionAttributeValues: { ":roomId": roomId },
-  }));
-
-  const payload = JSON.stringify({ type: "message", message });
-
-  await Promise.all((roomConnections.Items || []).map(async ({ connectionId: targetId }) => {
-    try {
-      await apiGw.send(new PostToConnectionCommand({ ConnectionId: targetId, Data: payload }));
-    } catch (err) {
-      // 410 Gone means the client disconnected without a clean $disconnect —
-      // stale row will also be swept by the connections table's TTL.
-      if (err.name !== "GoneException") console.error(`Failed to deliver to ${targetId}:`, err);
-    }
-  }));
 
   return { statusCode: 200, body: "Sent" };
 };

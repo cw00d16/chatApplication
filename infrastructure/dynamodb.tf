@@ -130,6 +130,12 @@ resource "aws_dynamodb_table" "messages" {
     type = "S"
   }
 
+  # Stream of every new message — triggers the fanout Lambda, which is what
+  # actually delivers messages to a room's connections. sendMessage only
+  # writes here; it doesn't deliver anything itself.
+  stream_enabled   = true
+  stream_view_type = "NEW_IMAGE"
+
   point_in_time_recovery {
     enabled = true
   }

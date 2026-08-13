@@ -102,6 +102,8 @@ resource "aws_iam_role_policy" "github_lambda" {
         aws_lambda_function.disconnect.arn,
         aws_lambda_function.join_room.arn,
         aws_lambda_function.send_message.arn,
+        aws_lambda_function.fanout.arn,
+        aws_lambda_function.deliver.arn,
         aws_lambda_function.rooms.arn,
         aws_lambda_function.history.arn
       ]
