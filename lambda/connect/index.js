@@ -88,11 +88,15 @@ exports.handler = async (event) => {
   const now = Date.now();
   await db.send(new PutCommand({
     TableName: CONNECTIONS_TABLE,
+    // roomId is deliberately omitted here (not set to "") — it's the
+    // roomId-index GSI's partition key, and DynamoDB rejects empty strings
+    // in GSI key attributes. joinRoom sets it once the client picks a room;
+    // until then the connection just doesn't show up in the GSI, which is
+    // the correct behavior anyway (nothing to fan out to it yet).
     Item: {
       connectionId: event.requestContext.connectionId,
       userId: claims.sub,
       displayName,
-      roomId: "",
       connectedAt: new Date(now).toISOString(),
       expiresAt: Math.floor(now / 1000) + 60 * 60 * 24, // 24h TTL safety net
     },
