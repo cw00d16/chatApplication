@@ -1,0 +1,170 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  # ---------------------------------------------------------------
+  # Deploy Lambda functions
+  # ---------------------------------------------------------------
+  deploy-lambdas:
+    name: Deploy Lambda functions
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC — no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Zip and deploy connect Lambda
+        run: |
+          cd lambda/connect
+          zip -r ../../connect.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-connect \
+            --zip-file fileb://connect.zip
+
+      - name: Zip and deploy disconnect Lambda
+        run: |
+          cd lambda/disconnect
+          zip -r ../../disconnect.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-disconnect \
+            --zip-file fileb://disconnect.zip
+
+      - name: Zip and deploy joinRoom Lambda
+        run: |
+          cd lambda/joinRoom
+          zip -r ../../joinRoom.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-join-room \
+            --zip-file fileb://joinRoom.zip
+
+      - name: Zip and deploy sendMessage Lambda
+        run: |
+          cd lambda/sendMessage
+          zip -r ../../sendMessage.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-send-message \
+            --zip-file fileb://sendMessage.zip
+
+      - name: Zip and deploy rooms Lambda
+        run: |
+          cd lambda/rooms
+          zip -r ../../rooms.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-rooms \
+            --zip-file fileb://rooms.zip
+
+      - name: Zip and deploy history Lambda
+        run: |
+          cd lambda/history
+          zip -r ../../history.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-history \
+            --zip-file fileb://history.zip
+
+  # ---------------------------------------------------------------
+  # Build and deploy React frontend
+  # ---------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy React frontend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build React app
+        working-directory: frontend
+        env:
+          # These come from GitHub → Settings → Secrets and variables → Actions
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+          REACT_APP_WEBSOCKET_URL: ${{ secrets.REACT_APP_WEBSOCKET_URL }}
+          REACT_APP_COGNITO_USER_POOL: ${{ secrets.REACT_APP_COGNITO_USER_POOL }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ secrets.REACT_APP_COGNITO_CLIENT_ID }}
+          REACT_APP_COGNITO_REGION: ${{ env.AWS_REGION }}
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync build to S3
+        run: |
+          aws s3 sync frontend/build/ s3://${{ secrets.S3_BUCKET_NAME }}/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html"
+
+          # index.html must never be cached — it's the SPA entry point
+          aws s3 cp frontend/build/index.html s3://${{ secrets.S3_BUCKET_NAME }}/index.html \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+  # ---------------------------------------------------------------
+  # PR checks (runs on pull requests, doesn't deploy)
+  # ---------------------------------------------------------------
+  test:
+    name: Build check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: https://placeholder.example.com
+          REACT_APP_WEBSOCKET_URL: wss://placeholder.example.com
+          REACT_APP_COGNITO_USER_POOL: us-east-2_placeholder
+          REACT_APP_COGNITO_CLIENT_ID: placeholder
+          REACT_APP_COGNITO_REGION: us-east-2
+        run: |
+          npm ci
+          npm run build

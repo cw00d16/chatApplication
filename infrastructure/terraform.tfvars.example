@@ -1,0 +1,19 @@
+# Copy this to terraform.tfvars and fill in your values
+# Never commit terraform.tfvars to git — add it to .gitignore
+
+aws_region   = "us-east-2"
+project_name = "chatApplication"
+environment  = "prod"
+
+# Your GitHub repo in owner/name format
+github_repo  = "cw00d16/chatApplication"
+
+# Optional: set to your custom domain or leave empty for CloudFront default
+domain_name  = ""
+
+# Lambda config
+lambda_memory_mb       = 256
+lambda_timeout_seconds = 10
+
+# DynamoDB billing — PAY_PER_REQUEST is cheapest for low traffic
+dynamodb_billing_mode  = "PAY_PER_REQUEST"

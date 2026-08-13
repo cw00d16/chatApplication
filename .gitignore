@@ -1,0 +1,19 @@
+# Terraform state and secrets — never commit these
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+.lambda_builds/
+*.zip
+
+# Local env files
+.env
+.env.local
+
+# Node
+node_modules/
+frontend/build/
+
+# macOS
+.DS_Store
