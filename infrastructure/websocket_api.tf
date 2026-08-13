@@ -27,6 +27,8 @@ resource "aws_apigatewayv2_stage" "chat" {
     throttling_burst_limit = 100
     throttling_rate_limit  = 50
   }
+
+  depends_on = [aws_api_gateway_account.main]
 }
 
 resource "aws_cloudwatch_log_group" "chat_api_gateway" {

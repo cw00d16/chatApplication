@@ -6,13 +6,12 @@
 # ---------------------------------------------------------------
 
 # OIDC provider — trust GitHub's token service
-resource "aws_iam_openid_connect_provider" "github" {
+#
+# This is an account-wide singleton (one provider per issuer URL per AWS
+# account), and urlShortener's Terraform already created it. Reference it
+# instead of trying to create a second one.
+data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
-
-  client_id_list = ["sts.amazonaws.com"]
-
-  # GitHub's OIDC thumbprint (stable — GitHub rotates the cert but keeps the thumbprint)
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
 # IAM role that GitHub Actions assumes via OIDC
@@ -24,7 +23,7 @@ resource "aws_iam_role" "github_actions" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = aws_iam_openid_connect_provider.github.arn
+        Federated = data.aws_iam_openid_connect_provider.github.arn
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {
