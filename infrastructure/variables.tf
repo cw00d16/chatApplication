@@ -48,4 +48,6 @@ variable "dynamodb_billing_mode" {
 locals {
   prefix            = "chatapp-${var.environment}"
   use_custom_domain = var.domain_name != ""
+  github_owner      = split("/", var.github_repo)[0]
+  github_name       = split("/", var.github_repo)[1]
 }

@@ -31,8 +31,15 @@ resource "aws_iam_role" "github_actions" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          # Only allow your specific repo — change this to your repo
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
+          # AWS requires `sub` (or `job_workflow_ref`) itself to be scoped —
+          # matching only the `repository` claim isn't accepted. GitHub now
+          # embeds immutable numeric IDs into `sub`
+          # (repo:owner@ownerId/name@repoId:ref:...) instead of the classic
+          # repo:owner/name:ref:... format, so match both shapes.
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repo}:*",
+            "repo:${local.github_owner}@*/${local.github_name}@*:*",
+          ]
         }
       }
     }]
