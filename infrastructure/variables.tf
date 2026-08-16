@@ -45,6 +45,17 @@ variable "dynamodb_billing_mode" {
   default     = "PAY_PER_REQUEST"
 }
 
+variable "alert_email" {
+  description = "Email address for CloudWatch alarm notifications (agent error rate, daily spend). SNS will send a one-time confirmation link to this address after apply."
+  type        = string
+}
+
+variable "daily_spend_alert_threshold_usd" {
+  description = "Estimated daily Claude spend (input + output tokens, list pricing) above which the agent-daily-spend alarm fires"
+  type        = number
+  default     = 5
+}
+
 locals {
   prefix            = "chatapp-${var.environment}"
   use_custom_domain = var.domain_name != ""

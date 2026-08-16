@@ -22,6 +22,15 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# X-Ray write access (telemetry only — no read access to any resource) so
+# sendMessage can emit trace segments. Only sendMessage actually has active
+# tracing turned on below; attaching this to the shared role doesn't change
+# what any other function on it can do.
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 # DynamoDB access for all Lambda functions
 resource "aws_iam_role_policy" "lambda_dynamo" {
   name = "${local.prefix}-lambda-dynamo"
@@ -345,6 +354,14 @@ resource "aws_lambda_function" "send_message" {
     variables = local.send_message_environment
   }
 
+  # Active tracing only on sendMessage and agent — the two hops in an
+  # @agent turn where "why was this slow" actually needs a trace (DynamoDB
+  # time vs. Claude API time vs. tool-call round trips). Every other
+  # function here is a fixed-cost DynamoDB read/write with nothing to trace.
+  tracing_config {
+    mode = "Active"
+  }
+
   depends_on = [aws_cloudwatch_log_group.send_message]
 }
 
@@ -481,6 +498,11 @@ resource "aws_iam_role_policy_attachment" "agent_lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_iam_role_policy_attachment" "agent_lambda_xray" {
+  role       = aws_iam_role.agent_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 resource "aws_iam_role_policy" "agent_dynamo" {
   name = "${local.prefix}-agent-dynamo"
   role = aws_iam_role.agent_lambda.id
@@ -531,6 +553,10 @@ resource "aws_lambda_function" "agent" {
 
   environment {
     variables = local.agent_environment
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   depends_on = [aws_cloudwatch_log_group.agent]

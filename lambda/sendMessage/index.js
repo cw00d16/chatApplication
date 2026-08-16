@@ -58,6 +58,10 @@ exports.handler = async (event) => {
   // Claude-related. The agent Lambda posts its reply back into
   // MESSAGES_TABLE itself, so it rides the normal delivery pipeline too.
   if (AGENT_FUNCTION_NAME && AGENT_MENTION_PATTERN.test(text)) {
+    // Structured, matching the agent Lambda's own log shape — the two
+    // together let a full @agent turn be traced end-to-end in CloudWatch
+    // Logs Insights by triggeringMessageId, starting from the hand-off.
+    console.log(JSON.stringify({ event: "agent_triggered", roomId, userId, triggeringMessageId: messageId }));
     await lambdaClient.send(new InvokeCommand({
       FunctionName: AGENT_FUNCTION_NAME,
       InvocationType: "Event",

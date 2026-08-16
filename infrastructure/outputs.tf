@@ -43,6 +43,11 @@ output "messages_table_name" {
   value       = aws_dynamodb_table.messages.name
 }
 
+output "agent_dashboard_url" {
+  description = "CloudWatch dashboard for the @agent feature (invocations, latency, estimated spend, refusals)"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.agent.dashboard_name}"
+}
+
 output "anthropic_api_key_secret_name" {
   description = "Secrets Manager secret to populate with `aws secretsmanager put-secret-value` (see infrastructure/secrets.tf)"
   value       = aws_secretsmanager_secret.anthropic_api_key.name
