@@ -1,0 +1,7 @@
+{
+  "id": "empty-context-edge-case",
+  "description": "A brand-new room with no prior messages still gets a sane, non-empty reply.",
+  "roomContext": [],
+  "triggeringMessage": { "displayName": "caleb", "body": "@agent hello!" },
+  "checks": [{ "type": "non_empty" }, { "type": "max_words", "value": 60 }]
+}

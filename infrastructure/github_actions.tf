@@ -111,3 +111,21 @@ resource "aws_iam_role_policy" "github_lambda" {
     }]
   })
 }
+
+# Policy: read the Anthropic API key for the eval-agent CI job. Read-only,
+# scoped to exactly the one secret the agent Lambda itself uses — no new
+# copy of the key gets created anywhere.
+resource "aws_iam_role_policy" "github_eval_secrets" {
+  name = "${local.prefix}-github-eval-secrets"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadAnthropicKeyForEvals"
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = aws_secretsmanager_secret.anthropic_api_key.arn
+    }]
+  })
+}

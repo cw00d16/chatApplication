@@ -1,0 +1,7 @@
+{
+  "id": "brevity-compliance",
+  "description": "An explicit brevity instruction in the message itself is followed.",
+  "roomContext": [],
+  "triggeringMessage": { "displayName": "caleb", "body": "@agent say hi in one word" },
+  "checks": [{ "type": "max_words", "value": 3 }]
+}

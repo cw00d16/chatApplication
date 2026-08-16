@@ -1,0 +1,10 @@
+{
+  "id": "helpfulness-quality",
+  "description": "An open-ended request needs an actually useful, concrete answer rather than a generic non-answer. Nuanced enough to need the judge.",
+  "roomContext": [
+    { "displayName": "caleb", "body": "we just made this room for the new team" }
+  ],
+  "triggeringMessage": { "displayName": "caleb", "body": "@agent what's a good icebreaker question for a new team chat?" },
+  "checks": [{ "type": "non_empty" }],
+  "rubric": "The response suggests a specific, usable icebreaker question — not a generic refusal, a request for more information, or vague filler with no actual suggestion."
+}

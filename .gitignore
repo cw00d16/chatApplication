@@ -16,5 +16,8 @@ tfplan*
 node_modules/
 frontend/build/
 
+# Eval harness output — per-run artifact, not source
+lambda/agent/evals/results.json
+
 # macOS
 .DS_Store

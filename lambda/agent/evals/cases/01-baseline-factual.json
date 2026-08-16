@@ -1,0 +1,7 @@
+{
+  "id": "baseline-factual",
+  "description": "Sanity check — a plain factual question gets a correct, on-topic answer.",
+  "roomContext": [],
+  "triggeringMessage": { "displayName": "caleb", "body": "@agent what year did the first moon landing happen?" },
+  "checks": [{ "type": "contains", "value": "1969" }]
+}
