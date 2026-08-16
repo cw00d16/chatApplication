@@ -178,7 +178,8 @@ exports.handler = async (event) => {
       // own if the prompt grows or the model changes. Room context isn't
       // cached — it's different on every call by definition.
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      output_config: { effort: "medium" },
+      // No output_config here — unlike Opus/Sonnet, Haiku 4.5 doesn't
+      // support the `effort` parameter at all and 400s if it's present.
       messages: [{ role: "user", content: userTurn }],
     });
 
