@@ -150,7 +150,45 @@ resource "aws_dynamodb_table" "messages" {
 # roomId      (S) — PK
 # sortKey     (S) — SK, "<createdAt>#<messageId>"
 # messageId   (S) — unique message ID
-# userId      (S) — Cognito sub of the sender
+# userId      (S) — Cognito sub of the sender ("agent" for the AI assistant)
 # displayName (S) — sender's display name at time of send
 # body        (S) — message text
 # createdAt   (S) — ISO 8601 timestamp
+# isAgent           (BOOL, agent replies only) — lets the frontend style them differently later
+# replyToMessageId  (S, agent replies only)    — messageId of the @agent mention this answers
+
+# ---------------------------------------------------------------
+# DynamoDB — agent rate limits
+#
+# One item per (userId, calendar minute), e.g. "abc123#29234567". The
+# window is baked into the key itself, so a plain TTL sweep is all the
+# cleanup this table ever needs — same pattern as the connections table's
+# expiresAt. See lambda/agent/index.js's checkRateLimit for the atomic
+# conditional-update logic that reads/writes this table.
+# ---------------------------------------------------------------
+
+resource "aws_dynamodb_table" "agent_rate_limits" {
+  name         = "${local.prefix}-agent-rate-limits"
+  billing_mode = var.dynamodb_billing_mode
+  hash_key     = "rateLimitKey"
+
+  attribute {
+    name = "rateLimitKey"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+}
+
+# Item schema (for reference — not enforced by DynamoDB):
+#
+# rateLimitKey (S) — "<userId>#<unixMinuteBucket>"
+# requestCount (N) — @agent invocations by this user in this minute
+# expiresAt    (N) — Unix timestamp, ~2 min out, for TTL cleanup

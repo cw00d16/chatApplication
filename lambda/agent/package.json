@@ -1,0 +1,9 @@
+{
+  "name": "chatapp-agent-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Handles @agent mentions: calls Claude and posts the reply back into the room.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1"
+  }
+}

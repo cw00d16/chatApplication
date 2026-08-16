@@ -43,6 +43,11 @@ output "messages_table_name" {
   value       = aws_dynamodb_table.messages.name
 }
 
+output "anthropic_api_key_secret_name" {
+  description = "Secrets Manager secret to populate with `aws secretsmanager put-secret-value` (see infrastructure/secrets.tf)"
+  value       = aws_secretsmanager_secret.anthropic_api_key.name
+}
+
 output "github_actions_role_arn" {
   description = "IAM role ARN for GitHub Actions to assume"
   value       = aws_iam_role.github_actions.arn

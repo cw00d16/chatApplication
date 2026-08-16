@@ -25,6 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: lambda/agent/package-lock.json
+
       - name: Configure AWS credentials (OIDC — no stored keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -102,6 +108,16 @@ jobs:
           aws lambda update-function-code \
             --function-name chatapp-prod-history \
             --zip-file fileb://history.zip
+
+      - name: Zip and deploy agent Lambda
+        run: |
+          cd lambda/agent
+          npm ci --omit=dev
+          zip -r ../../agent.zip .
+          cd ../..
+          aws lambda update-function-code \
+            --function-name chatapp-prod-agent \
+            --zip-file fileb://agent.zip
 
   # ---------------------------------------------------------------
   # Build and deploy React frontend

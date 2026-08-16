@@ -101,6 +101,22 @@ resource "aws_iam_role_policy" "lambda_invoke_deliver" {
   })
 }
 
+# sendMessage invokes agent directly (fire-and-forget) when a message
+# contains an @agent mention
+resource "aws_iam_role_policy" "lambda_invoke_agent" {
+  name = "${local.prefix}-lambda-invoke-agent"
+  role = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["lambda:InvokeFunction"]
+      Resource = aws_lambda_function.agent.arn
+    }]
+  })
+}
+
 # --- Common environment variables for all functions ---
 locals {
   lambda_environment = {
@@ -122,6 +138,21 @@ locals {
   fanout_environment = merge(local.lambda_environment, {
     DELIVER_FUNCTION_NAME = aws_lambda_function.deliver.function_name
   })
+
+  # sendMessage additionally needs to know which function to hand @agent
+  # mentions off to
+  send_message_environment = merge(local.lambda_environment, {
+    AGENT_FUNCTION_NAME = aws_lambda_function.agent.function_name
+  })
+
+  # agent's own environment — deliberately not built on local.lambda_environment:
+  # it doesn't touch the connections/rooms tables or Cognito, so it gets only
+  # what it actually uses (see the dedicated IAM role below).
+  agent_environment = {
+    MESSAGES_TABLE         = aws_dynamodb_table.messages.name
+    AGENT_RATE_LIMIT_TABLE = aws_dynamodb_table.agent_rate_limits.name
+    ANTHROPIC_SECRET_ARN   = aws_secretsmanager_secret.anthropic_api_key.arn
+  }
 }
 
 # --- CloudWatch log groups — one per function ---
@@ -162,6 +193,11 @@ resource "aws_cloudwatch_log_group" "rooms" {
 
 resource "aws_cloudwatch_log_group" "history" {
   name              = "/aws/lambda/${local.prefix}-history"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "agent" {
+  name              = "/aws/lambda/${local.prefix}-agent"
   retention_in_days = 14
 }
 
@@ -212,6 +248,30 @@ data "archive_file" "history" {
   type        = "zip"
   source_dir  = "${path.module}/../lambda/history"
   output_path = "${path.module}/.lambda_builds/history.zip"
+}
+
+# agent is the only Lambda with a real npm dependency (@anthropic-ai/sdk —
+# every other function only uses the AWS SDK v3, which ships in the Node.js
+# 20 Lambda runtime and needs no bundling). archive_file just zips whatever
+# is on disk, so node_modules has to exist before it runs; this installs it
+# whenever package.json/package-lock.json change, rather than relying on
+# whoever runs `terraform apply` to remember a manual `npm install` step.
+resource "null_resource" "agent_npm_install" {
+  triggers = {
+    package_lock_hash = filesha256("${path.module}/../lambda/agent/package-lock.json")
+  }
+
+  provisioner "local-exec" {
+    command     = "npm ci --omit=dev"
+    working_dir = "${path.module}/../lambda/agent"
+  }
+}
+
+data "archive_file" "agent" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/agent"
+  output_path = "${path.module}/.lambda_builds/agent.zip"
+  depends_on  = [null_resource.agent_npm_install]
 }
 
 # --- connect Lambda ---
@@ -282,7 +342,7 @@ resource "aws_lambda_function" "send_message" {
   timeout          = var.lambda_timeout_seconds
 
   environment {
-    variables = local.lambda_environment
+    variables = local.send_message_environment
   }
 
   depends_on = [aws_cloudwatch_log_group.send_message]
@@ -389,4 +449,89 @@ resource "aws_lambda_permission" "history" {
   function_name = aws_lambda_function.history.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------
+# agent Lambda — its own IAM role rather than the shared one every other
+# function uses. It never reads/writes connections or rooms and never
+# calls the WebSocket management API directly (it replies by writing to
+# messages, same as sendMessage, and rides the existing fanout/deliver
+# pipeline from there), so it gets a narrower policy: PutItem + Query on
+# messages, UpdateItem on its own rate-limit table, and GetSecretValue on
+# exactly one secret. Compromise of this function's credentials can't
+# read message history it wasn't already given, delete anything, or touch
+# any other table.
+# ---------------------------------------------------------------
+
+resource "aws_iam_role" "agent_lambda" {
+  name = "${local.prefix}-agent-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_lambda_basic" {
+  role       = aws_iam_role.agent_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "agent_dynamo" {
+  name = "${local.prefix}-agent-dynamo"
+  role = aws_iam_role.agent_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:Query"]
+        Resource = aws_dynamodb_table.messages.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:UpdateItem"]
+        Resource = aws_dynamodb_table.agent_rate_limits.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "agent_secrets" {
+  name = "${local.prefix}-agent-secrets"
+  role = aws_iam_role.agent_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = aws_secretsmanager_secret.anthropic_api_key.arn
+    }]
+  })
+}
+
+resource "aws_lambda_function" "agent" {
+  function_name    = "${local.prefix}-agent"
+  role             = aws_iam_role.agent_lambda.arn
+  runtime          = "nodejs20.x"
+  handler          = "index.handler"
+  filename         = data.archive_file.agent.output_path
+  source_code_hash = data.archive_file.agent.output_base64sha256
+  memory_size      = var.lambda_memory_mb
+  # Overrides the shared 10s default — a Claude call (plus an optional web
+  # search round trip) routinely takes longer than the quick DynamoDB CRUD
+  # every other function here does.
+  timeout = 30
+
+  environment {
+    variables = local.agent_environment
+  }
+
+  depends_on = [aws_cloudwatch_log_group.agent]
 }
